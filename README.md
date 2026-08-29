@@ -63,13 +63,16 @@ head spec additionally depends on `bun` and runs the frontend build first.
 The crate tarball is the release artifact, so ESCPost must reach crates.io
 before this tap can point at it.
 
-1. In the ESCPost repository, publish the release. `just publish` refuses a
-   dirty worktree, rebuilds the frontend bundle so the crate carries it, and
-   uploads the workspace crates in dependency order:
+1. In the ESCPost repository, publish the release:
 
    ```sh
-   just publish
+   just publish <version>
    ```
+
+   That sets the workspace version, runs the tests, and — after asking —
+   commits, tags, pushes, and uploads the crates in dependency order. It
+   refuses to start from a dirty worktree, and rebuilds the frontend bundle so
+   the crate carries it.
 
 2. In this repository, update the formula and publish it to users:
 
@@ -89,7 +92,8 @@ before this tap can point at it.
 Step 2 needs `just link` to have been run once in this repository; see
 [Working on this tap locally](#working-on-this-tap-locally).
 
-Existing users pick the release up through `brew update && brew upgrade escpost`.
+Existing users pick the release up through `brew update` and
+`brew upgrade escpost`.
 
 ### What `just bump` does
 
@@ -124,8 +128,8 @@ edits here have no effect until they are pushed. To make `brew` resolve
 just link
 ```
 
-`just unlink` restores Homebrew's own clone of this repository from GitHub. Run `just` on its
-own to list every recipe.
+`just unlink` restores Homebrew's own clone of this repository from GitHub. Run
+`just` on its own to list every recipe.
 
 ## License
 
