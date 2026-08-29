@@ -1,8 +1,8 @@
 class Escpost < Formula
   desc "ESC/POS developer toolbox for receipt and label printers"
   homepage "https://escpost.dev"
-  url "https://static.crates.io/crates/escpost/escpost-0.2.0.crate"
-  sha256 "b043721c6b887aca7dea22109444680b4bf7df9a562b28388e86ed3cad7bad72"
+  url "https://static.crates.io/crates/escpost/escpost-0.2.1.crate"
+  sha256 "5056166467c4824d53f887b3ab9f11d0b385d7d12353c2dac851a264c42f3dc1"
   license "Apache-2.0"
 
   # A git checkout has no frontend/dist, so a head build must produce one.
