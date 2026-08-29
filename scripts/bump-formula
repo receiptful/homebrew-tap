@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+
+"""Point the escpost formula at a newly published crates.io release.
+
+The formula's stable build takes its source from the crates.io release tarball,
+so a release amounts to two lines: the `url` and the `sha256`. crates.io serves
+the digest as `version.checksum`, which is the SHA-256 of the `.crate` file
+Homebrew downloads, so there is no need to fetch and hash the tarball to learn
+it. The tarball is fetched anyway, but only to confirm it carries the paths the
+formula's build depends on.
+"""
+
+import hashlib
+import io
+import json
+import re
+import sys
+import tarfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+
+CRATE = "escpost"
+FORMULA = Path("Formula") / f"{CRATE}.rb"
+
+# build.rs requires the bundle and rust-embed compiles it in, so a crate
+# published without it would break every install.
+REQUIRED_PATHS = ("frontend/dist/index.html",)
+
+VERSION = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
+USER_AGENT = "receiptful-homebrew-tap (https://github.com/receiptful/homebrew-tap)"
+
+# crates.io serves a crate only after the publish has propagated, so a bump run
+# straight after `just publish` has to wait for it rather than fail.
+POLL_ATTEMPTS = 30
+POLL_SECONDS = 10
+
+
+def fetch(url: str) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return response.read()
+
+
+def await_release(version: str) -> str:
+    """Return the checksum crates.io recorded, waiting for the release to appear."""
+    url = f"https://crates.io/api/v1/crates/{CRATE}/{version}"
+    for attempt in range(1, POLL_ATTEMPTS + 1):
+        try:
+            payload = json.loads(fetch(url))
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+        else:
+            release = payload["version"]
+            if release["yanked"]:
+                raise ValueError(f"{CRATE} {version} is yanked on crates.io")
+            return release["checksum"]
+        print(f"waiting for {CRATE} {version} on crates.io ({attempt}/{POLL_ATTEMPTS})")
+        time.sleep(POLL_SECONDS)
+    raise ValueError(f"{CRATE} {version} did not appear on crates.io")
+
+
+def verify_crate(version: str, url: str, checksum: str) -> None:
+    """Confirm the tarball matches its checksum and carries what we build from."""
+    archive = fetch(url)
+    digest = hashlib.sha256(archive).hexdigest()
+    if digest != checksum:
+        raise ValueError(f"tarball digest {digest} does not match crates.io {checksum}")
+
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        names = set(tar.getnames())
+    for required in REQUIRED_PATHS:
+        if f"{CRATE}-{version}/{required}" not in names:
+            raise ValueError(f"{CRATE} {version} does not carry {required}")
+
+
+def replace_once(text: str, pattern: str, value: str, description: str) -> str:
+    matches = list(re.finditer(pattern, text, flags=re.MULTILINE))
+    if len(matches) != 1:
+        raise ValueError(f"expected one {description}, found {len(matches)}")
+    return re.sub(
+        pattern,
+        lambda match: f"{match.group(1)}{value}{match.group(2)}",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1:
+        print(f"usage: {Path(sys.argv[0]).name} VERSION", file=sys.stderr)
+        return 2
+    version = argv[0]
+
+    if not VERSION.match(version):
+        raise ValueError(f"{version} is not a release version")
+    if not FORMULA.is_file():
+        raise ValueError(f"{FORMULA} does not exist")
+
+    url = f"https://static.crates.io/crates/{CRATE}/{CRATE}-{version}.crate"
+    checksum = await_release(version)
+    verify_crate(version, url, checksum)
+
+    text = FORMULA.read_text()
+    text = replace_once(text, r'^(  url ")[^"]+(")$', url, "url line")
+    text = replace_once(text, r'^(  sha256 ")[0-9a-f]{64}(")$', checksum, "sha256 line")
+    FORMULA.write_text(text)
+
+    print(f"{FORMULA} -> {version}")
+    print(f"  url    {url}")
+    print(f"  sha256 {checksum}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (ValueError, urllib.error.URLError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        sys.exit(1)

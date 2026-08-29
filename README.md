@@ -61,55 +61,71 @@ head spec additionally depends on `bun` and runs the frontend build first.
 ## Releasing a new version
 
 The crate tarball is the release artifact, so ESCPost must reach crates.io
-before this tap can point at it. `escpost` depends on `escpost-render` and
-`escpost-profiles` at the same workspace version, and crates.io refuses a crate
-whose dependencies it does not yet have, so the publish order matters.
+before this tap can point at it.
 
-1. In the ESCPost repository, build the frontend and publish, in order:
-
-   ```sh
-   just frontend-build
-   cargo publish -p escpost-render
-   cargo publish -p escpost-profiles
-   cargo publish -p escpost          # or: just publish
-   ```
-
-2. Confirm the crate carries the bundle:
+1. In the ESCPost repository, publish the release. `just publish` refuses a
+   dirty worktree, rebuilds the frontend bundle so the crate carries it, and
+   uploads the workspace crates in dependency order:
 
    ```sh
-   curl -sL https://static.crates.io/crates/escpost/escpost-<version>.crate \
-     | tar tz | grep frontend/dist
+   just publish
    ```
 
-3. Get the digest Homebrew must verify:
+2. In this repository, update the formula and publish it to users:
 
    ```sh
-   curl -sL https://static.crates.io/crates/escpost/escpost-<version>.crate \
-     | sha256sum
+   just release <version>
    ```
 
-4. Update `url` and `sha256` in `Formula/escpost.rb`, then verify before
-   pushing:
+   This rewrites the formula, verifies it, shows you the change, and asks
+   before committing and pushing. Pushing is what makes the new version
+   reachable through `brew install`. Use `just bump <version>` instead to stop
+   after the edit and verification, and commit yourself.
 
-   ```sh
-   brew style Formula/escpost.rb
-   brew audit --strict --online receiptful/tap/escpost
-   brew install --build-from-source receiptful/tap/escpost
-   brew test receiptful/tap/escpost
-   ```
+   Re-run it if a release stops partway. It works out what is outstanding, so
+   an aborted prompt or a failed push resumes rather than reporting that there
+   is nothing left to do.
+
+Step 2 needs `just link` to have been run once in this repository; see
+[Working on this tap locally](#working-on-this-tap-locally).
 
 Existing users pick the release up through `brew update && brew upgrade escpost`.
 
+### What `just bump` does
+
+`bump` waits for the release to reach crates.io, because `cargo publish`
+returns before the crate is downloadable. It then reads the digest from the
+registry rather than hashing the tarball itself: crates.io publishes
+`version.checksum`, which is the SHA-256 of the `.crate` file Homebrew
+downloads. It still fetches the tarball, to confirm it matches that digest and
+carries `frontend/dist/index.html` — a crate published without the bundle would
+fail `build.rs` on every user's machine, and this catches that here instead.
+It rewrites the `url` and `sha256` lines, refusing to guess if either line does
+not appear exactly once, then runs `check`.
+
+`check` runs `brew style` and `brew audit --strict --online`. To also build and
+test the formula the way a user would, run `just verify`, which takes as long
+as a full Rust build.
+
+`brew audit` resolves a formula through the tap rather than from a path, so it
+reads whichever checkout Homebrew has registered — by default its own clone of
+this repository, not this working tree. Auditing that clone after editing here
+would check a file nobody changed, so `check` refuses to run unless Homebrew
+resolves this checkout. Run `just link` once to arrange that; `just unlink`
+restores the clone.
+
 ## Working on this tap locally
 
-Symlink the checkout into Homebrew's tap directory so `brew` resolves
-`receiptful/tap/escpost` from your working tree:
+By default Homebrew reads formulae from its own clone of this repository, so
+edits here have no effect until they are pushed. To make `brew` resolve
+`receiptful/tap/escpost` from this working tree instead:
 
 ```sh
-ln -sfn "$PWD" "$(brew --repo)/Library/Taps/receiptful/homebrew-tap"
+just link
 ```
 
-Remove it with `rm "$(brew --repo)/Library/Taps/receiptful/homebrew-tap"`.
+`just unlink` restores Homebrew's own clone of this repository from GitHub. Run `just` on its
+own to list every recipe.
 
 ## License
 
